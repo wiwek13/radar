@@ -21,6 +21,19 @@ lists every kubeconfig context, running ones first, with each session's memory:
   is stopped with Ctrl+C in the terminal.
 - "Stop others" stops every session except this tab's.
 
+## Split view
+
+"Split view" in the dropdown's footer turns the rows into tick boxes, with this
+tab's cluster ticked. Pick 2 or 3 and press "Open side by side": this tab opens
+`/split?s=<slug>,<slug>[,<slug>]`, a slim bar over one full Radar per cluster.
+
+- Each pane is the same `/s/<slug>/` Radar a tab would show. Switching cluster
+  inside a pane changes only that pane, and the address follows it.
+- A pane whose session is stopped says so and offers "Start it again".
+- The close button removes a pane; with one left, the tab returns to that
+  cluster's normal view. "Back to one cluster" opens the left pane's cluster.
+- Inside a pane, the dropdown has no Split view.
+
 Every session's log is printed in the `radar-sessions` terminal, each line
 prefixed with its context, and kept in `<home>/<slug>/radar.log`.
 
@@ -73,8 +86,13 @@ report files are never copied.
   name (DNS rebinding).
 - Writes need the `X-Radar-Sessions: 1` header and a same-origin request;
   reads refuse `Sec-Fetch-Site: cross-site` and `same-site`.
-- The controller serves no pages of its own: `/` redirects to the first
-  cluster and `/_sessions/api/` is the only other route.
+- The controller's only page is `/split`. It frames only `/s/<slug>/` panes
+  (`frame-src 'self'`), cannot itself be framed (`frame-ancestors 'none'`) and
+  uses a nonce-based CSP. Its cluster list is cut to known contexts, at most 3.
+- Every proxied Radar response carries `X-Frame-Options: SAMEORIGIN`, so no
+  other site can frame a cluster's Radar.
+- Loading a page or a pane (`Sec-Fetch-Dest` of `document` or `iframe`) may
+  start a session; nothing else does.
 - Flags the controller owns (`--port`, `--kubeconfig`, `--kubeconfig-dir`,
   `--listen-address`, `--base-path`, `--no-browser`) cannot be passed through.
 
