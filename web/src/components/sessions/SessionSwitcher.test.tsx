@@ -119,4 +119,73 @@ describe('SessionSwitcher', () => {
     const others = [...container.querySelectorAll('button')].find(b => b.textContent?.startsWith('Stop others'))
     expect(others?.disabled).toBe(true)
   })
+
+  describe('split view', () => {
+    const footerButton = (text: string) =>
+      [...container.querySelectorAll('button')].find(b => b.textContent?.startsWith(text)) ?? null
+    const pick = (name: string) => button(`Show ${name} side by side`)
+    const rowButton = (name: string) =>
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes(name) && !b.getAttribute('aria-label'))!
+
+    let assign: ReturnType<typeof vi.fn>
+    beforeEach(() => {
+      sessions.push({ context: 'stage', slug: 'stage-1a2b3c4d', state: 'stopped' })
+      assign = vi.fn()
+      vi.stubGlobal('location', { ...window.location, assign, href: window.location.href })
+    })
+
+    it('keeps the normal dropdown until Split view is pressed', async () => {
+      setBasename(`/s/${DEV}`)
+      await render()
+      await openMenu()
+      expect(button('Open qa in a new tab')).not.toBeNull()
+      expect(button('Stop prod')).not.toBeNull()
+      expect(pick('qa')).toBeNull()
+      expect(footerButton('Split view')).not.toBeNull()
+    })
+
+    it('ticks this tab and picked rows, refuses a fourth, and opens them in order', async () => {
+      setBasename(`/s/${DEV}`)
+      await render()
+      await openMenu()
+      await act(async () => { footerButton('Split view')!.click() })
+      expect(pick('dev')!.getAttribute('aria-checked')).toBe('true')
+      expect(button('Open qa in a new tab')).toBeNull()
+      expect(footerButton('Open side by side')!.disabled).toBe(true)
+
+      await act(async () => { rowButton('qa').click() })
+      expect(assign).not.toHaveBeenCalled()
+      expect(pick('qa')!.getAttribute('aria-checked')).toBe('true')
+      await act(async () => { pick('prod')!.click() })
+      expect(pick('stage')!.disabled).toBe(true)
+      await act(async () => { rowButton('stage').click() })
+      expect(pick('stage')!.getAttribute('aria-checked')).toBe('false')
+
+      await act(async () => { footerButton('Open side by side')!.click() })
+      expect(assign).toHaveBeenCalledWith(`/split?s=${DEV},${QA},${PROD}`)
+    })
+
+    it('Cancel and closing the menu bring back the normal dropdown', async () => {
+      setBasename(`/s/${DEV}`)
+      await render()
+      await openMenu()
+      await act(async () => { footerButton('Split view')!.click() })
+      await act(async () => { footerButton('Cancel')!.click() })
+      expect(button('Open qa in a new tab')).not.toBeNull()
+
+      await act(async () => { footerButton('Split view')!.click() })
+      await act(async () => { document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+      await openMenu()
+      expect(pick('qa')).toBeNull()
+      expect(button('Open qa in a new tab')).not.toBeNull()
+    })
+
+    it('offers no Split view inside a pane', async () => {
+      setBasename(`/s/${DEV}`)
+      vi.stubGlobal('top', {})
+      await render()
+      await openMenu()
+      expect(footerButton('Split view')).toBeNull()
+    })
+  })
 })

@@ -77,6 +77,9 @@ export interface ClusterSwitcherProps {
   label?: string
   /** Controls shown at the end of a row, outside its select button. */
   renderItemActions?: (item: ClusterSwitcherItem, isCurrent: boolean) => ReactNode
+  /** Leave the menu open after a row is picked, for multi-select hosts. */
+  keepOpenOnSelect?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 // Trigger width cap. With middle-truncation kicking in, this is a
@@ -106,6 +109,8 @@ export const ClusterSwitcher = forwardRef<ClusterSwitcherHandle, ClusterSwitcher
   variant = 'chip',
   label,
   renderItemActions,
+  keepOpenOnSelect = false,
+  onOpenChange,
 }, ref) => {
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -151,6 +156,17 @@ export const ClusterSwitcher = forwardRef<ClusterSwitcherHandle, ClusterSwitcher
     return m
   }, [flat])
 
+  const onOpenChangeRef = useRef(onOpenChange)
+  onOpenChangeRef.current = onOpenChange
+  const firstRender = useRef(true)
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false
+      return
+    }
+    onOpenChangeRef.current?.(isOpen)
+  }, [isOpen])
+
   useEffect(() => {
     if (!isOpen) return
     setSearch('')
@@ -192,7 +208,7 @@ export const ClusterSwitcher = forwardRef<ClusterSwitcherHandle, ClusterSwitcher
       window.open(item.href, '_blank', 'noopener')
       return
     }
-    setIsOpen(false)
+    if (!keepOpenOnSelect) setIsOpen(false)
     if (item.href) {
       window.location.href = item.href
       return
