@@ -1,1 +1,216 @@
-<!doctype html><title>Radar split view</title><script nonce="{{NONCE}}"></script>
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar split view</title>
+<meta name="description" content="Two or three Radar clusters side by side, each in its own pane.">
+<style nonce="{{NONCE}}">
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Radar (project tokens, DESIGN.md) · signature: clusters side by side, each a whole Radar · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H5 E4 S4 R5 V3 · weakest: V, a tab bar over panes is the familiar shape on purpose; the bar carries only what a pane cannot show about itself */
+:root {
+  --bg: #F0F3F9; --surface: #F8FBFE; --elevated: #E6ECF5; --hover: #DDE5F2;
+  --text: #1A1C20; --text-2: #555860; --text-3: #6B7080;
+  --border: #D8E0EE; --border-2: #CDD6E8;
+  --brand: #4A7CC9; --brand-strong: #3B66A8; --on-brand: #FFFFFF;
+  --ok: #16A34A; --warn: #B45309; --bad: #DC2626;
+  --scrim: rgba(240, 243, 249, .92);
+  --sans: "DM Sans Variable", "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0B0F1E; --surface: #14192A; --elevated: #1E2338; --hover: #282E48;
+  --text: #F5F6F8; --text-2: #D8DAE0; --text-3: #B0B5C0;
+  --border: #222840; --border-2: #2C324A;
+  --brand: #6A9FE0; --brand-strong: #6A9FE0; --on-brand: #0B0F1E;
+  --ok: #22C55E; --warn: #FBBF24; --bad: #F87171;
+  --scrim: rgba(11, 15, 30, .92);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow-x: clip; }
+body { background: var(--bg); color: var(--text); font: 13px/1.4 var(--sans); display: grid; grid-template-rows: 36px minmax(0, 1fr); }
+button { font: inherit; color: inherit; }
+button:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+.bar { display: flex; min-width: 0; background: var(--surface); border-bottom: 1px solid var(--border); }
+.back { flex: none; display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 12px; border: 0; border-right: 1px solid var(--border); background: none; color: var(--text-2); font-weight: 500; cursor: pointer; }
+.back:hover { background: var(--hover); color: var(--text); }
+.back:active { background: var(--elevated); }
+.back svg, .close svg { width: 12px; height: 12px; flex: none; }
+.tabs, .panes { flex: 1; min-width: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.tab { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 4px 0 12px; border-right: 1px solid var(--border); }
+.tab:last-child { border-right: 0; }
+.name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.state { flex: none; color: var(--text-3); }
+.state[data-state="failed"] { color: var(--bad); }
+.state[data-state="starting"], .state[data-state="stopping"] { color: var(--warn); }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.close { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 5px; background: none; color: var(--text-3); cursor: pointer; }
+.close:hover { background: var(--hover); color: var(--text); }
+.close:active { background: var(--elevated); }
+.offline { flex: none; align-self: center; padding: 0 12px; color: var(--bad); }
+
+.pane { position: relative; min-width: 0; border-right: 1px solid var(--border-2); }
+.pane:last-child { border-right: 0; }
+iframe { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
+.cover { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; background: var(--scrim); color: var(--text-2); }
+.cover strong { color: var(--text); font-size: 15px; font-weight: 600; overflow-wrap: break-word; min-width: 0; }
+.start { height: 32px; padding: 0 16px; border: 1px solid var(--brand-strong); border-radius: 6px; background: var(--brand-strong); color: var(--on-brand); font-weight: 500; cursor: pointer; }
+.start:hover { filter: brightness(1.08); }
+.start:active { filter: brightness(.95); }
+.start:disabled { opacity: .5; cursor: progress; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button type="button" class="back" id="back"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5"/></svg>Back to one cluster</button>
+  <div class="tabs" id="tabs"></div>
+  <span class="offline" id="offline" hidden>Radar sessions is not answering</span>
+</div>
+<div class="panes" id="panes"><noscript>Split view needs JavaScript.</noscript></div>
+
+<script nonce="{{NONCE}}">
+(() => {
+  const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/
+  const PANE_PATH = /^\/s\/([a-z0-9]+(?:-[a-z0-9]+)*)\//
+  const STATE_LABEL = { starting: 'Starting', stopping: 'Stopping', stopped: 'Stopped', failed: 'Failed' }
+  const sessionPath = slug => `/s/${slug}/`
+
+  const root = document.documentElement
+  const applyTheme = () => {
+    let theme = null
+    try { theme = localStorage.getItem('radar-theme') } catch {}
+    if (theme !== 'light' && theme !== 'dark') {
+      theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+    }
+    root.dataset.theme = theme
+  }
+  applyTheme()
+  addEventListener('storage', e => { if (e.key === 'radar-theme') applyTheme() })
+
+  const slugs = (new URLSearchParams(location.search).get('s') || '').split(',').filter(s => SLUG.test(s))
+  let known = new Map()
+  const panes = []
+  const tabsEl = document.getElementById('tabs')
+  const panesEl = document.getElementById('panes')
+
+  const writeAddress = () => {
+    history.replaceState(null, '', '/split?s=' + panes.map(p => p.slug).join(','))
+  }
+  const goSingle = slug => location.assign(sessionPath(slug))
+
+  function addPane(slug) {
+    const p = { slug }
+    p.tab = document.createElement('div')
+    p.tab.className = 'tab'
+    p.dot = document.createElement('span')
+    p.dot.className = 'dot'
+    p.name = document.createElement('span')
+    p.name.className = 'name'
+    p.state = document.createElement('span')
+    p.state.className = 'state'
+    p.close = document.createElement('button')
+    p.close.type = 'button'
+    p.close.className = 'close'
+    p.close.innerHTML = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9"/></svg>'
+    p.close.addEventListener('click', () => closePane(p))
+    p.tab.append(p.dot, p.name, p.state, p.close)
+
+    p.el = document.createElement('div')
+    p.el.className = 'pane'
+    p.frame = document.createElement('iframe')
+    p.frame.src = sessionPath(slug)
+    p.frame.addEventListener('load', () => followPane(p))
+    p.cover = document.createElement('div')
+    p.cover.className = 'cover'
+    p.cover.hidden = true
+    p.coverText = document.createElement('strong')
+    p.coverNote = document.createElement('span')
+    p.start = document.createElement('button')
+    p.start.type = 'button'
+    p.start.className = 'start'
+    p.start.textContent = 'Start it again'
+    p.start.addEventListener('click', () => {
+      p.start.disabled = true
+      p.start.textContent = 'Starting…'
+      // Loading the pane is what starts its session.
+      p.frame.src = sessionPath(p.slug)
+    })
+    p.cover.append(p.coverText, p.coverNote, p.start)
+    p.el.append(p.frame, p.cover)
+
+    tabsEl.append(p.tab)
+    panesEl.append(p.el)
+    panes.push(p)
+    render(p)
+  }
+
+  // A pane switches cluster through Radar's own dropdown, which loads
+  // another /s/<slug>/ in the frame; keep the address in step with it.
+  function followPane(p) {
+    let path = ''
+    try { path = p.frame.contentWindow.location.pathname } catch { return }
+    const m = PANE_PATH.exec(path)
+    if (m && m[1] !== p.slug) {
+      p.slug = m[1]
+      writeAddress()
+    }
+    p.start.disabled = false
+    p.start.textContent = 'Start it again'
+    render(p)
+  }
+
+  function closePane(p) {
+    const i = panes.indexOf(p)
+    if (i < 0) return
+    panes.splice(i, 1)
+    p.tab.remove()
+    p.el.remove()
+    if (panes.length === 1) return goSingle(panes[0].slug)
+    writeAddress()
+    panes[Math.min(i, panes.length - 1)].close.focus()
+  }
+
+  function render(p) {
+    const info = known.get(p.slug)
+    const label = info ? info.context : p.slug
+    const state = info ? info.state : 'starting'
+    p.name.textContent = label
+    p.dot.hidden = state !== 'running'
+    p.state.hidden = state === 'running'
+    p.state.dataset.state = state
+    p.state.textContent = STATE_LABEL[state] || ''
+    p.close.setAttribute('aria-label', `Close ${label}`)
+    p.frame.title = `Radar for ${label}`
+    const down = info && (state === 'stopped' || state === 'failed') && !p.start.disabled
+    p.cover.hidden = !down
+    if (down) {
+      p.coverText.textContent = state === 'failed' ? `${label} failed to start` : `${label} is stopped`
+      p.coverNote.textContent = state === 'failed'
+        ? (info.error || 'Its log is in the radar-sessions terminal.')
+        : 'It was stopped from another tab or pane.'
+    }
+  }
+
+  async function poll() {
+    try {
+      const resp = await fetch('/_sessions/api/state', { headers: { Accept: 'application/json' } })
+      if (!resp.ok) throw new Error(String(resp.status))
+      const body = await resp.json()
+      known = new Map((body.sessions || []).map(s => [s.slug, s]))
+      document.getElementById('offline').hidden = true
+    } catch {
+      document.getElementById('offline').hidden = false
+    }
+    panes.forEach(render)
+  }
+
+  document.getElementById('back').addEventListener('click', () => goSingle(panes[0].slug))
+  slugs.forEach(addPane)
+  poll()
+  setInterval(poll, 3000)
+})()
+</script>
+</body>
+</html>
