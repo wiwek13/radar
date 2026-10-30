@@ -281,8 +281,11 @@ export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownl
     // Back on the current run, auto-stream arms again unless the user stopped it.
     autoStartedForRef.current = null
     clear()
+    // A time window counts back from now; a previous run ended earlier, so it
+    // is read by line count only.
+    if (previous && logRange.startsWith('since:')) setLogRange('100')
     setShowPrevious(previous)
-  }, [stopStreaming, clear])
+  }, [stopStreaming, clear, logRange])
 
   const handleStopStreaming = useCallback(() => {
     userStoppedRef.current = true
@@ -413,7 +416,8 @@ export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownl
         value={logRange}
         onChange={setLogRange}
         lineOptions={[50, 100, 500, 1000]}
-        tooltip="How many logs to load per pod — by line count or time range"
+        timeOptions={!showPrevious}
+        tooltip={showPrevious ? 'How many lines to load from each previous run' : 'How many logs to load per pod — by line count or time range'}
         isDark={isDark}
         disabled={isStreaming || sourceUnavailable}
         disabledReason={sourceUnavailable ? 'No log source is available yet' : undefined}

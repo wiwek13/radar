@@ -27,8 +27,10 @@ func EarlierRun(pod *corev1.Pod, container string) (had, known bool) {
 // has no earlier run to give. It comes as a 400, so any other failure that
 // mentions the phrase is left alone.
 func IsNoPreviousRun(err error) bool {
-	return apierrors.IsBadRequest(err) && strings.Contains(err.Error(), "previous terminated container")
+	return apierrors.IsBadRequest(err) && strings.Contains(err.Error(), noPreviousRunPhrase)
 }
+
+const noPreviousRunPhrase = "previous terminated container"
 
 const waitingToStart = "is waiting to start"
 

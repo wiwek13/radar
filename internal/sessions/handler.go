@@ -136,6 +136,11 @@ func (h *handler) serveSession(w http.ResponseWriter, r *http.Request) {
 				"The Radar session for "+contextName+" is "+string(state)+".")
 			return
 		}
+		if !startAllowed(r) {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Error(w, "Radar for "+contextName+" is "+string(state)+". Open it from Radar's cluster dropdown, or type its address.", http.StatusForbidden)
+			return
+		}
 		var err error
 		if target, err = h.awaitRunning(r.Context(), slug, contextName); err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -334,6 +339,19 @@ func isNavigation(r *http.Request) bool {
 		return dest == "document" || dest == "iframe"
 	}
 	return strings.Contains(r.Header.Get("Accept"), "text/html")
+}
+
+// startAllowed reports whether a page load may start a stopped session. A
+// page on another site can frame or open this address too, and that must not
+// bring a session up: a frame must come from this controller's own split
+// page, and a top-level load from the user (typed, bookmarked, or one of
+// these pages).
+func startAllowed(r *http.Request) bool {
+	site := r.Header.Get("Sec-Fetch-Site")
+	if r.Header.Get("Sec-Fetch-Dest") == "iframe" {
+		return site == "same-origin"
+	}
+	return site == "" || site == "none" || site == "same-origin"
 }
 
 // readAllowed refuses what the browser labels as coming from another site.

@@ -215,7 +215,7 @@ func TestCollectPreviousRunsReadsOnlyRestartedContainers(t *testing.T) {
 		pod("web-c", fresh),
 	}
 
-	got, found := CollectPreviousRuns(context.Background(), client, "test", pods, "", 100, nil)
+	got, found := CollectPreviousRuns(context.Background(), client, "test", pods, "", 100)
 	if !found || len(got.Logs) != 2 || got.Notice != "" {
 		t.Fatalf("found=%v snapshot=%+v", found, got)
 	}
@@ -231,10 +231,44 @@ func TestCollectPreviousRunsReadsOnlyRestartedContainers(t *testing.T) {
 	}
 	mu.Unlock()
 
-	if _, found := CollectPreviousRuns(context.Background(), client, "test", pods, "app", 100, nil); !found {
+	if _, found := CollectPreviousRuns(context.Background(), client, "test", pods, "app", 100); !found {
 		t.Fatal("container filter dropped web-a/app")
 	}
-	if got, found := CollectPreviousRuns(context.Background(), client, "test", pods[2:], "", 100, nil); found || len(got.Logs) != 0 {
+	if got, found := CollectPreviousRuns(context.Background(), client, "test", pods[2:], "", 100); found || len(got.Logs) != 0 {
 		t.Fatalf("no restarts: found=%v logs=%d", found, len(got.Logs))
+	}
+}
+
+func TestCollectPreviousRunsTreatsDroppedRunsAsNothingToShow(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("sinceSeconds") != "" {
+			t.Errorf("previous runs must not use a time window: %v", r.URL.Query())
+		}
+		if strings.Contains(r.URL.Path, "web-gone") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"BadRequest","code":400,"message":"previous terminated container \"app\" in pod \"web-gone\" not found"}`)
+			return
+		}
+		fmt.Fprintln(w, "2026-10-13T10:00:00Z before the crash")
+	}))
+	defer api.Close()
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: api.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod := func(name string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+			Status:     corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "app", RestartCount: 1}}},
+		}
+	}
+	if got, found := CollectPreviousRuns(context.Background(), client, "test", []*corev1.Pod{pod("web-gone")}, "", 100); found || got.Notice != "" {
+		t.Fatalf("dropped run: found=%v notice=%q", found, got.Notice)
+	}
+	got, found := CollectPreviousRuns(context.Background(), client, "test", []*corev1.Pod{pod("web-gone"), pod("web-ok")}, "", 100)
+	if !found || len(got.Logs) != 1 || got.Notice != "" {
+		t.Fatalf("one dropped, one kept: found=%v logs=%d notice=%q", found, len(got.Logs), got.Notice)
 	}
 }

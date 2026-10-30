@@ -102,7 +102,7 @@ func CollectPods(ctx context.Context, client kubernetes.Interface, namespace str
 // whose status records an earlier run, like kubectl logs --previous across a
 // workload. found is false when no selected container has one, so the caller can
 // say so instead of showing an empty list.
-func CollectPreviousRuns(ctx context.Context, client kubernetes.Interface, namespace string, pods []*corev1.Pod, container string, tailLines int64, sinceSeconds *int64) (snapshot Snapshot, found bool) {
+func CollectPreviousRuns(ctx context.Context, client kubernetes.Interface, namespace string, pods []*corev1.Pod, container string, tailLines int64) (snapshot Snapshot, found bool) {
 	sources := []Source{}
 	for _, pod := range pods {
 		for _, c := range k8s.GetContainersForPod(pod, container, true) {
@@ -114,7 +114,21 @@ func CollectPreviousRuns(ctx context.Context, client kubernetes.Interface, names
 	if len(sources) == 0 {
 		return Snapshot{Logs: []Entry{}, SourcePods: map[string]bool{}}, false
 	}
-	return CollectSources(ctx, client, namespace, sources, tailLines, sinceSeconds, false), true
+	// The window counts back from now, but a previous run ended at some
+	// earlier time, so only a line count makes sense here.
+	snapshot = CollectSources(ctx, client, namespace, sources, tailLines, nil, false)
+	// The node may already have dropped an earlier run that the status still
+	// counts. That is nothing to show, not a read failure.
+	kept := snapshot.errors[:0]
+	for _, e := range snapshot.errors {
+		if !strings.Contains(e, noPreviousRunPhrase) {
+			kept = append(kept, e)
+		}
+	}
+	dropped := len(snapshot.errors) - len(kept)
+	snapshot.errors = kept
+	snapshot.Notice = snapshot.Summarize(func(Clip) bool { return true })
+	return snapshot, dropped < len(sources)
 }
 
 func NewSource(pod *corev1.Pod, container string, previous bool) Source {

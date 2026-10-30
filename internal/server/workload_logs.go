@@ -379,7 +379,7 @@ func (s *Server) handleWorkloadLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if previous {
-		snapshot, found := podlogs.CollectPreviousRuns(r.Context(), client, namespace, pods, container, tailLines, sinceSeconds)
+		snapshot, found := podlogs.CollectPreviousRuns(r.Context(), client, namespace, pods, container, tailLines)
 		podlogs.Sort(snapshot.Logs)
 		response := map[string]any{
 			"pods":     podlogs.BuildPodInfos(pods),

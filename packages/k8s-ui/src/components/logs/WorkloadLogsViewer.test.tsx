@@ -116,3 +116,20 @@ it('shows the server answer when nothing has restarted', async () => {
   expect(host.textContent).toContain('No container in these pods has restarted.')
   await act(async () => root.unmount())
 })
+
+it('reads previous runs by line count only', async () => {
+  const host = document.createElement('div'); const root = createRoot(host)
+  const fetchAll = vi.fn(async (_params: { previous?: boolean; sinceSeconds?: number; tailLines?: number }) => ({ pods: [{ name: 'web-1', containers: ['app'], ready: true }], logs: [] }))
+  await act(async () => root.render(<WorkloadLogsViewer name="web" fetchAll={fetchAll} previousRuns />))
+  const range = [...host.querySelectorAll<HTMLSelectElement>('select')].find((el) => [...el.options].some((o) => o.value === 'since:900'))!
+  await act(async () => {
+    range.value = 'since:900'
+    range.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  expect(fetchAll).toHaveBeenLastCalledWith(expect.objectContaining({ sinceSeconds: 900 }))
+  await chooseRun(host, 'previous')
+  expect(fetchAll).toHaveBeenLastCalledWith(expect.objectContaining({ previous: true, tailLines: 100, sinceSeconds: undefined }))
+  expect([...host.querySelectorAll('option')].some((o) => o.value === 'since:900')).toBe(false)
+  await act(async () => root.unmount())
+})
+

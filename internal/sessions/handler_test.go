@@ -360,7 +360,7 @@ func TestWebSocketUpgradeReachesOwnSession(t *testing.T) {
 func TestIframeLoadStartsSession(t *testing.T) {
 	b := newFakeBackend(t, "dev")
 	h := NewHandler(b, "dev")
-	rec := serve(h, "GET", "/s/"+Slug("dev")+"/", map[string]string{"Sec-Fetch-Dest": "iframe"})
+	rec := serve(h, "GET", "/s/"+Slug("dev")+"/", map[string]string{"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Site": "same-origin"})
 	if rec.Code != http.StatusOK || rec.Header().Get("X-Served-By") != "dev" || len(b.started) != 1 {
 		t.Fatalf("iframe load = %d served by %q, started %v", rec.Code, rec.Header().Get("X-Served-By"), b.started)
 	}
@@ -421,5 +421,35 @@ func TestProxyRefusesForeignFraming(t *testing.T) {
 	rec := serve(NewHandler(b, "dev"), "GET", "/s/"+Slug("dev")+"/", nil)
 	if rec.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
 		t.Fatalf("X-Frame-Options = %q", rec.Header().Get("X-Frame-Options"))
+	}
+}
+
+// A page on another site can frame or open a session address. Only this
+// controller's own pages, or the user typing or opening the address, may start
+// a stopped session.
+func TestOtherSitesCannotStartASession(t *testing.T) {
+	for _, h := range []map[string]string{
+		{"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Site": "cross-site"},
+		{"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Site": "same-site"},
+		{"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Site": "none"},
+		{"Sec-Fetch-Dest": "iframe"},
+		{"Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "cross-site"},
+		{"Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "same-site"},
+	} {
+		b := newFakeBackend(t, "prod")
+		rec := serve(NewHandler(b, "prod"), "GET", "/s/"+Slug("prod")+"/", h)
+		if rec.Code == http.StatusOK || len(b.started) != 0 {
+			t.Fatalf("%v: got %d, started %v", h, rec.Code, b.started)
+		}
+	}
+	for _, h := range []map[string]string{
+		{"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Site": "same-origin"},
+		{"Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "none"},
+		{"Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "same-origin"},
+	} {
+		b := newFakeBackend(t, "prod")
+		if rec := serve(NewHandler(b, "prod"), "GET", "/s/"+Slug("prod")+"/", h); rec.Code != http.StatusOK || len(b.started) != 1 {
+			t.Fatalf("%v: got %d, started %v", h, rec.Code, b.started)
+		}
 	}
 }
