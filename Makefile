@@ -58,6 +58,11 @@ kind-load-probe:
 build: frontend embed backend
 	@echo "Build complete: ./radar"
 
+# Session controller: one Radar per kubeconfig context (docs/cluster-sessions.md)
+.PHONY: sessions
+sessions:
+	go build -o radar-sessions ./cmd/radar-sessions
+
 # Build and install to /usr/local/bin
 install: build
 	@echo "Installing to /usr/local/bin/kubectl-radar..."
