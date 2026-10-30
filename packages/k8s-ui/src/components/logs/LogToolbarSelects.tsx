@@ -89,3 +89,37 @@ export function LogRangeSelect({
     </Tooltip>
   )
 }
+
+// ── RunSelect ─────────────────────────────────────────────────────────────────
+
+interface RunSelectProps {
+  previous: boolean
+  onChange: (previous: boolean) => void
+  isDark?: boolean
+  disabled?: boolean
+}
+
+/** Current run or the run before each container's last restart (kubectl logs --previous). */
+export function RunSelect({ previous, onChange, isDark = true, disabled = false }: RunSelectProps) {
+  const palette = getLogPalette(isDark)
+  return (
+    <Tooltip
+      content="Previous run shows each restarted container's logs from before its last restart, like kubectl logs --previous"
+      position="bottom"
+    >
+      <div className="relative">
+        <select
+          aria-label="Which run to show"
+          value={previous ? 'previous' : 'current'}
+          onChange={(e) => onChange(e.target.value === 'previous')}
+          disabled={disabled}
+          className={`${selectClass(palette)} pr-6 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+          <option value="current">Current run</option>
+          <option value="previous">Previous run</option>
+        </select>
+        <ChevronDown className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 ${palette.textSecondary} pointer-events-none`} />
+      </div>
+    </Tooltip>
+  )
+}

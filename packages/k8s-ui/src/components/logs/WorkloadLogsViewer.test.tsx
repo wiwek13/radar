@@ -63,3 +63,56 @@ it('offers only named containers when the backend cannot read all containers', a
   expect(fetchAll).toHaveBeenLastCalledWith(expect.objectContaining({ container: 'plugin-barman-cloud' }))
   await act(async () => root.unmount())
 })
+
+const runSelect = (host: HTMLElement) => host.querySelector<HTMLSelectElement>('select[aria-label="Which run to show"]')
+async function chooseRun(host: HTMLElement, value: 'current' | 'previous') {
+  const select = runSelect(host)!
+  await act(async () => {
+    select.value = value
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+function fakeStream() {
+  return { addEventListener: vi.fn(), close: vi.fn() } as unknown as EventSource
+}
+
+it('offers no run choice unless the host asks for it', async () => {
+  const host = document.createElement('div'); const root = createRoot(host)
+  await act(async () => root.render(<WorkloadLogsViewer name="web" fetchAll={async () => ({ pods: [], logs: [] })} />))
+  expect(runSelect(host)).toBeNull()
+  await act(async () => root.unmount())
+})
+
+it('reads previous runs as a snapshot and returns to the live stream', async () => {
+  const host = document.createElement('div'); const root = createRoot(host)
+  const fetchAll = vi.fn(async (_params: { previous?: boolean }) => ({
+    pods: [{ name: 'web-1', containers: ['app'], ready: true }],
+    logs: [{ pod: 'web-1', container: 'app', timestamp: '2026-10-30T10:00:00Z', content: 'panic: before the restart' }],
+  }))
+  const streams: EventSource[] = []
+  const createStream = vi.fn(() => { const s = fakeStream(); streams.push(s); return s })
+  await act(async () => root.render(<WorkloadLogsViewer name="web" fetchAll={fetchAll} createStream={createStream} autoStream previousRuns />))
+  expect(createStream).toHaveBeenCalledTimes(1)
+  expect(fetchAll).not.toHaveBeenCalled()
+
+  await chooseRun(host, 'previous')
+  expect(streams[0].close).toHaveBeenCalled()
+  expect(fetchAll).toHaveBeenLastCalledWith(expect.objectContaining({ previous: true }))
+  expect(host.textContent).not.toContain('No logs available')
+  expect([...host.querySelectorAll('button')].some((b) => b.textContent === 'Stream')).toBe(false)
+
+  await chooseRun(host, 'current')
+  expect(createStream).toHaveBeenCalledTimes(2)
+  await act(async () => root.unmount())
+})
+
+it('shows the server answer when nothing has restarted', async () => {
+  const host = document.createElement('div'); const root = createRoot(host)
+  const fetchAll = vi.fn(async (params: { previous?: boolean }) => params.previous
+    ? { pods: [{ name: 'web-1', containers: ['app'], ready: true }], logs: [], emptyReason: 'no_previous_run', emptyMessage: 'No container in these pods has restarted.' }
+    : { pods: [{ name: 'web-1', containers: ['app'], ready: true }], logs: [] })
+  await act(async () => root.render(<WorkloadLogsViewer name="web" fetchAll={fetchAll} previousRuns />))
+  await chooseRun(host, 'previous')
+  expect(host.textContent).toContain('No container in these pods has restarted.')
+  await act(async () => root.unmount())
+})

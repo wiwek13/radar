@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -180,5 +181,60 @@ func TestParseLineAcceptsAllKubernetesTimestampPrecisions(t *testing.T) {
 		if stamp != tc.stamp || content != tc.content {
 			t.Errorf("ParseLine(%q)=(%q,%q), want (%q,%q)", tc.line, stamp, content, tc.stamp, tc.content)
 		}
+	}
+}
+
+func TestCollectPreviousRunsReadsOnlyRestartedContainers(t *testing.T) {
+	var mu sync.Mutex
+	asked := []string{}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked = append(asked, strings.Split(r.URL.Path, "/")[6]+"/"+r.URL.Query().Get("container")+" previous="+r.URL.Query().Get("previous"))
+		mu.Unlock()
+		fmt.Fprintln(w, "2026-10-13T10:00:00Z before the crash")
+	}))
+	defer api.Close()
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: api.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod := func(name string, statuses ...corev1.ContainerStatus) *corev1.Pod {
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		for _, s := range statuses {
+			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: s.Name})
+		}
+		p.Status.ContainerStatuses = statuses
+		return p
+	}
+	restarted := corev1.ContainerStatus{Name: "app", RestartCount: 2}
+	terminated := corev1.ContainerStatus{Name: "sidecar", LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}}}
+	fresh := corev1.ContainerStatus{Name: "app"}
+	pods := []*corev1.Pod{
+		pod("web-a", restarted, corev1.ContainerStatus{Name: "sidecar"}),
+		pod("web-b", fresh, terminated),
+		pod("web-c", fresh),
+	}
+
+	got, found := CollectPreviousRuns(context.Background(), client, "test", pods, "", 100, nil)
+	if !found || len(got.Logs) != 2 || got.Notice != "" {
+		t.Fatalf("found=%v snapshot=%+v", found, got)
+	}
+	for _, e := range got.Logs {
+		if !e.Previous {
+			t.Fatalf("entry not marked previous: %+v", e)
+		}
+	}
+	mu.Lock()
+	sort.Strings(asked)
+	if want := []string{"web-a/app previous=true", "web-b/sidecar previous=true"}; !reflect.DeepEqual(asked, want) {
+		t.Fatalf("asked %v, want %v", asked, want)
+	}
+	mu.Unlock()
+
+	if _, found := CollectPreviousRuns(context.Background(), client, "test", pods, "app", 100, nil); !found {
+		t.Fatal("container filter dropped web-a/app")
+	}
+	if got, found := CollectPreviousRuns(context.Background(), client, "test", pods[2:], "", 100, nil); found || len(got.Logs) != 0 {
+		t.Fatalf("no restarts: found=%v logs=%d", found, len(got.Logs))
 	}
 }

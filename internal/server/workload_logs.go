@@ -337,7 +337,10 @@ func (s *Server) authorizePodLogRead(w http.ResponseWriter, r *http.Request, nam
 	return true
 }
 
-// handleWorkloadLogs fetches and merges logs from all pods (non-streaming)
+// handleWorkloadLogs fetches and merges logs from all pods (non-streaming).
+// previous=true reads each restarted container's run before the current one
+// instead; there is no stream of those, since a finished run has nothing to
+// follow.
 func (s *Server) handleWorkloadLogs(w http.ResponseWriter, r *http.Request) {
 	kind := strings.ToLower(chi.URLParam(r, "kind"))
 	namespace := chi.URLParam(r, "namespace")
@@ -350,6 +353,7 @@ func (s *Server) handleWorkloadLogs(w http.ResponseWriter, r *http.Request) {
 	container := r.URL.Query().Get("container")
 	tailLines := podlogs.ParseTailLines(r.URL.Query().Get("tailLines"), 100)
 	sinceSeconds := podlogs.ParseSinceSeconds(r.URL.Query().Get("sinceSeconds"))
+	previous := r.URL.Query().Get("previous") == "true"
 
 	pods, err := s.getWorkloadPods(kind, namespace, name)
 	if err != nil {
@@ -371,6 +375,25 @@ func (s *Server) handleWorkloadLogs(w http.ResponseWriter, r *http.Request) {
 	client := s.getClientForRequest(r)
 	if client == nil {
 		s.writeError(w, http.StatusServiceUnavailable, "cluster client not available — check cluster connection")
+		return
+	}
+
+	if previous {
+		snapshot, found := podlogs.CollectPreviousRuns(r.Context(), client, namespace, pods, container, tailLines, sinceSeconds)
+		podlogs.Sort(snapshot.Logs)
+		response := map[string]any{
+			"pods":     podlogs.BuildPodInfos(pods),
+			"logs":     snapshot.Logs,
+			"notice":   snapshot.Notice,
+			"previous": true,
+		}
+		if !found {
+			addWorkloadLogMetadata(response, workloadLogMetadata{
+				EmptyReason:  "no_previous_run",
+				EmptyMessage: "No container in these pods has restarted, so there is no previous run to show. Logs of deleted pods are gone from Kubernetes.",
+			})
+		}
+		s.writeJSON(w, response)
 		return
 	}
 

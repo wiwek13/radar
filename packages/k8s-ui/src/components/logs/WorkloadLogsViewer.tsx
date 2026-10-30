@@ -4,7 +4,7 @@ import { parseLogRange } from '../../utils/log-format'
 import { triggerDownload } from '../../utils/download'
 import { useLogBuffer } from './useLogBuffer'
 import { useLogStream } from './useLogStream'
-import { ContainerSelect, LogRangeSelect } from './LogToolbarSelects'
+import { ContainerSelect, LogRangeSelect, RunSelect } from './LogToolbarSelects'
 import { LogCore } from './LogCore'
 import type { LogExportPayload } from '../../utils/log-export'
 import type { LogPalette } from './log-palette'
@@ -25,6 +25,8 @@ export interface WorkloadLogsFetchParams {
   container?: string
   tailLines?: number
   sinceSeconds?: number
+  /** Read each restarted container's run before its last restart. */
+  previous?: boolean
 }
 
 export interface WorkloadLogsResult {
@@ -74,9 +76,11 @@ export interface WorkloadLogsViewerProps {
   allowAllContainers?: boolean
   /** Rendered only when the loaded source list is empty. */
   emptySourceState?: ReactNode
+  /** Offer a Current run / Previous run choice. `fetchAll` must honour `previous`. */
+  previousRuns?: boolean
 }
 
-export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownload, forceDark, defaultDark, autoStream = false, initialPods, initialContainer, allowAllContainers = true, emptySourceState, disableSourceControlsWithoutSource = false }: WorkloadLogsViewerProps) {
+export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownload, forceDark, defaultDark, autoStream = false, initialPods, initialContainer, allowAllContainers = true, emptySourceState, disableSourceControlsWithoutSource = false, previousRuns = false }: WorkloadLogsViewerProps) {
   const initialSelection = (names: string[]) => {
     const wanted = names.filter((n) => initialPods?.includes(n))
     return new Set(wanted.length > 0 ? wanted : names)
@@ -94,13 +98,15 @@ export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownl
   const [emptyCommand, setEmptyCommand] = useState<string | null>(null)
   const [showPodFilter, setShowPodFilter] = useState(false)
   const [logRange, setLogRange] = useState('100')
+  const [showPrevious, setShowPrevious] = useState(false)
   const { showError, showSuccess } = useToast()
 
   const { tailLines, sinceSeconds } = parseLogRange(logRange)
   const { entries, isFollowing, pendingLineCount, retainedLineCount, missingLineCount, getRetainedEntries, setFollowing, append, set, clear } = useLogBuffer()
   const { isStreaming, streamError, connecting, startStreaming, stopStreaming } = useLogStream()
 
-  const willAutoStream = autoStream && !!createStream
+  // A finished run has nothing to follow, so Previous run is a snapshot only.
+  const willAutoStream = autoStream && !!createStream && !showPrevious
   const sourceUnavailable = disableSourceControlsWithoutSource && pods.length === 0
   // null sentinel so the initial selectedContainer ('' = all) still arms once.
   const autoStartedForRef = useRef<string | null>(null)
@@ -129,7 +135,7 @@ export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownl
     setIsLoading(true)
     setFetchError(null)
     try {
-      const result = await fetchAll({ container: selectedContainer || undefined, tailLines, sinceSeconds, signal: controller.signal })
+      const result = await fetchAll({ container: selectedContainer || undefined, tailLines, sinceSeconds, previous: showPrevious || undefined, signal: controller.signal })
       if (controller.signal.aborted) return
       setNotice(result.notice || '')
       setCapturedAt(result.capturedAt || '')
@@ -169,7 +175,7 @@ export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownl
     } finally {
       if (!controller.signal.aborted) setIsLoading(false)
     }
-  }, [fetchAll, selectedContainer, tailLines, sinceSeconds, set])
+  }, [fetchAll, selectedContainer, tailLines, sinceSeconds, showPrevious, set])
 
   // When auto-streaming the stream supplies the initial tail, so the static
   // snapshot fetch is skipped to avoid a redundant request and a flash of
@@ -269,6 +275,14 @@ export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownl
       'Workload log stream connection failed',
     )
   }, [createStream, startStreaming, selectedContainer, sinceSeconds, append, clear])
+
+  const choosePrevious = useCallback((previous: boolean) => {
+    if (previous) stopStreaming()
+    // Back on the current run, auto-stream arms again unless the user stopped it.
+    autoStartedForRef.current = null
+    clear()
+    setShowPrevious(previous)
+  }, [stopStreaming, clear])
 
   const handleStopStreaming = useCallback(() => {
     userStoppedRef.current = true
@@ -391,6 +405,10 @@ export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownl
         isDark={isDark}
       />
 
+      {previousRuns && (
+        <RunSelect previous={showPrevious} onChange={choosePrevious} isDark={isDark} disabled={sourceUnavailable} />
+      )}
+
       <LogRangeSelect
         value={logRange}
         onChange={setLogRange}
@@ -439,7 +457,7 @@ export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownl
       allEntries={entries}
       isLoading={isLoading || isConnecting}
       isStreaming={isStreaming}
-      onStartStream={createStream ? handleStartStreaming : undefined}
+      onStartStream={createStream && !showPrevious ? handleStartStreaming : undefined}
       sourceUnavailable={sourceUnavailable}
       onStopStream={handleStopStreaming}
       onRefresh={loadLogs}

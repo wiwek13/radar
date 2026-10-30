@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { fetchJSON, createWorkloadLogStream } from '../../api/client'
+import { fetchJSON, createWorkloadLogStream, useRadarFeature } from '../../api/client'
 import { WorkloadLogsViewer as SharedWorkloadLogsViewer } from '@skyhook-io/k8s-ui'
 import type { WorkloadLogsFetchParams, WorkloadLogsResult } from '@skyhook-io/k8s-ui'
 import { useDesktopDownload } from '../../hooks/useDesktopDownload'
@@ -18,6 +18,7 @@ interface WorkloadLogsViewerProps {
 export function WorkloadLogsViewer({ kind, namespace, name, autoStream = true, snapshotOnly = false, role }: WorkloadLogsViewerProps) {
   const desktopDownload = useDesktopDownload()
   const { theme } = useTheme()
+  const { support: previousSupport } = useRadarFeature('workloadPreviousLogs')
 
   const fetchAll = useCallback(async (params: WorkloadLogsFetchParams): Promise<WorkloadLogsResult> => {
     const query = new URLSearchParams()
@@ -25,6 +26,7 @@ export function WorkloadLogsViewer({ kind, namespace, name, autoStream = true, s
     if (role) query.set('role', role)
     if (params.tailLines) query.set('tailLines', String(params.tailLines))
     if (params.sinceSeconds) query.set('sinceSeconds', String(params.sinceSeconds))
+    if (params.previous) query.set('previous', 'true')
     const qs = query.toString()
     const data = await fetchJSON<WorkloadLogsResult>(
       `${snapshotOnly ? `/jobsets/${namespace}/${name}` : `/workloads/${kind}/${namespace}/${name}`}/logs${qs ? `?${qs}` : ''}`, { signal: params.signal }
@@ -47,6 +49,8 @@ export function WorkloadLogsViewer({ kind, namespace, name, autoStream = true, s
       forceDark={theme === 'dark' ? true : undefined}
       defaultDark={false}
       autoStream={autoStream}
+      // JobSet logs come from another endpoint, which has no previous run.
+      previousRuns={!snapshotOnly && previousSupport === 'supported'}
     />
   )
 }

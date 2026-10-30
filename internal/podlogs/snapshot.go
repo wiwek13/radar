@@ -98,6 +98,25 @@ func CollectPods(ctx context.Context, client kubernetes.Interface, namespace str
 	return CollectSources(ctx, client, namespace, sources, tailLines, sinceSeconds, bounded)
 }
 
+// CollectPreviousRuns reads the run before the current one of every container
+// whose status records an earlier run, like kubectl logs --previous across a
+// workload. found is false when no selected container has one, so the caller can
+// say so instead of showing an empty list.
+func CollectPreviousRuns(ctx context.Context, client kubernetes.Interface, namespace string, pods []*corev1.Pod, container string, tailLines int64, sinceSeconds *int64) (snapshot Snapshot, found bool) {
+	sources := []Source{}
+	for _, pod := range pods {
+		for _, c := range k8s.GetContainersForPod(pod, container, true) {
+			if had, _ := EarlierRun(pod, c); had {
+				sources = append(sources, NewSource(pod, c, true))
+			}
+		}
+	}
+	if len(sources) == 0 {
+		return Snapshot{Logs: []Entry{}, SourcePods: map[string]bool{}}, false
+	}
+	return CollectSources(ctx, client, namespace, sources, tailLines, sinceSeconds, false), true
+}
+
 func NewSource(pod *corev1.Pod, container string, previous bool) Source {
 	return Source{Pod: pod.Name, Container: container, Previous: previous, running: pod.Status.Phase == corev1.PodRunning, created: pod.CreationTimestamp.Time}
 }
