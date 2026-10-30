@@ -34,7 +34,6 @@ import { DURATION_DOCK, overlayExitMs } from '@skyhook-io/k8s-ui/utils/animation
 import { ContextSwitcher } from './components/ContextSwitcher'
 import { NamespaceSwitcher, type NamespaceSwitcherHandle } from './components/NamespaceSwitcher'
 import { CloudFunnelButton } from './components/CloudFunnelButton'
-import { SessionsMenu } from './components/sessions/SessionsMenu'
 import { useNavCustomization } from './context/NavCustomization'
 import type { FleetTakeoverTarget } from './context/NavCustomization'
 import { PrimaryNavRail } from './components/nav/PrimaryNavRail'
@@ -1954,8 +1953,6 @@ function AppInner({ manageDocumentTitle = false, documentTitleSuffix, onClusterL
           <GlobalDiagnoseButton />
 
           <CloudFunnelButton />
-
-          <SessionsMenu />
 
           {/* Local terminal */}
           {capabilities.localTerminal && (

@@ -11,9 +11,18 @@ make build sessions
 ./radar-sessions -- --disable-exec    # extra flags for every session's Radar
 ```
 
-Open `http://localhost:9300/_sessions/` to list, start and stop sessions. Inside
-Radar, the layers button in the header does the same: click a cluster to move
-this tab to it, Cmd/Ctrl-click to open it in a new tab, the square to stop it.
+Everything is controlled from Radar's own cluster dropdown in the header. It
+lists every kubeconfig context, running ones first, with each session's memory:
+
+- Click a cluster to load it in this tab. Other tabs keep their cluster.
+- Cmd/Ctrl-click, or the open-in-new-tab icon, loads it in a new tab.
+- The square stops a session and frees its memory. Stopping this tab's own
+  session moves the tab to another running cluster; the last running session
+  is stopped with Ctrl+C in the terminal.
+- "Stop others" stops every session except this tab's.
+
+Every session's log is printed in the `radar-sessions` terminal, each line
+prefixed with its context, and kept in `<home>/<slug>/radar.log`.
 
 ## How it works
 
@@ -47,8 +56,10 @@ report files are never copied.
 
 - **Stop** sends SIGTERM, waits 15 s, then kills the session's process group.
   The pinned kubeconfig is deleted when the process exits.
-- **A stopped session stays stopped.** Requests from an open tab get
-  `503 session_stopped`; only the Start button (status page or menu) starts it.
+- **Only loading a page starts a session.** Opening `/s/<slug>/` starts that
+  cluster's Radar and holds the page load until it answers (Radar then shows its
+  own connecting screen). API calls from a tab left open on a stopped session
+  get `503 session_stopped` and never start it.
 - **Controller exit** (Ctrl+C, SIGTERM, SIGHUP) stops every session.
 - **Controller crash or SIGKILL**: each session runs under a guard
   (`radar-sessions guard`) that polls its parent and ends the session when the
@@ -62,7 +73,8 @@ report files are never copied.
   name (DNS rebinding).
 - Writes need the `X-Radar-Sessions: 1` header and a same-origin request;
   reads refuse `Sec-Fetch-Site: cross-site` and `same-site`.
-- The controller's own pages use a nonce-based CSP with no inline exceptions.
+- The controller serves no pages of its own: `/` redirects to the first
+  cluster and `/_sessions/api/` is the only other route.
 - Flags the controller owns (`--port`, `--kubeconfig`, `--kubeconfig-dir`,
   `--listen-address`, `--base-path`, `--no-browser`) cannot be passed through.
 
@@ -73,8 +85,8 @@ report files are never copied.
   what you want. A single tab that moves between clusters keeps its
   `sessionStorage`, so an unsaved YAML draft for a same-named resource could
   reappear on the other cluster.
-- Every running session is a full Radar. The menu and the manager page show
-  each one's memory; stop the ones you are not using.
+- Every running session is a full Radar. The cluster dropdown shows each one's
+  memory; stop the ones you are not using.
 - `radar diagnose` and MCP clients that read `~/.radar/mcp-port` find your
   normal Radar, not a session. Each session's MCP endpoint is
   `http://localhost:9300/s/<slug>/mcp`.

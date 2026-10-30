@@ -31,7 +31,8 @@ export interface ClusterSwitcherItem {
   group?: { key: string; label?: string }
   disabled?: boolean
   status?: StatusTone
-  /** Hard navigation target. Takes precedence over the parent's `onSelect`. */
+  /** Hard navigation target. Takes precedence over the parent's `onSelect`;
+   *  Cmd/Ctrl-click opens it in a new tab. */
   href?: string
   /** Native tooltip — useful on disabled rows to explain why the row is inert.
    *  ClusterName supplies its own tooltip for the cluster name itself; this
@@ -74,6 +75,8 @@ export interface ClusterSwitcherProps {
   variant?: 'chip' | 'segment'
   /** Muted label shown before the value in the 'segment' variant (e.g. "Cluster"). */
   label?: string
+  /** Controls shown at the end of a row, outside its select button. */
+  renderItemActions?: (item: ClusterSwitcherItem, isCurrent: boolean) => ReactNode
 }
 
 // Trigger width cap. With middle-truncation kicking in, this is a
@@ -102,6 +105,7 @@ export const ClusterSwitcher = forwardRef<ClusterSwitcherHandle, ClusterSwitcher
   align = 'left',
   variant = 'chip',
   label,
+  renderItemActions,
 }, ref) => {
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -182,8 +186,12 @@ export const ClusterSwitcher = forwardRef<ClusterSwitcherHandle, ClusterSwitcher
     }
   }, [isOpen])
 
-  const select = (item: ClusterSwitcherItem) => {
+  const select = (item: ClusterSwitcherItem, newTab = false) => {
     if (item.disabled || item.id === currentId) return
+    if (item.href && newTab) {
+      window.open(item.href, '_blank', 'noopener')
+      return
+    }
     setIsOpen(false)
     if (item.href) {
       window.location.href = item.href
@@ -334,22 +342,24 @@ export const ClusterSwitcher = forwardRef<ClusterSwitcherHandle, ClusterSwitcher
                   {group.items.map(item => {
                     const idx = indexById.get(item.id) ?? -1
                     const isCurrent = item.id === currentId
-                    return (
+                    const actions = renderItemActions?.(item, isCurrent)
+                    const rowTone = isCurrent
+                      ? 'selection'
+                      : idx === highlightedIndex
+                        ? 'bg-theme-hover cursor-pointer'
+                        : 'hover:bg-theme-hover cursor-pointer'
+                    const row = (
                       <button
                         type="button"
                         key={item.id}
                         data-highlighted={idx === highlightedIndex}
-                        onClick={() => select(item)}
+                        onClick={e => select(item, e.metaKey || e.ctrlKey)}
                         onMouseEnter={() => setHighlightedIndex(idx)}
                         disabled={isCurrent || item.disabled}
                         title={item.title}
                         className={`
                           w-full flex items-center gap-2 px-3 py-2 text-left transition-colors
-                          ${isCurrent
-                            ? 'selection'
-                            : idx === highlightedIndex
-                              ? 'bg-theme-hover cursor-pointer'
-                              : 'hover:bg-theme-hover cursor-pointer'}
+                          ${actions ? 'flex-1 min-w-0' : rowTone}
                           disabled:opacity-50
                         `}
                       >
@@ -420,6 +430,17 @@ export const ClusterSwitcher = forwardRef<ClusterSwitcherHandle, ClusterSwitcher
                           )}
                         </div>
                       </button>
+                    )
+                    if (!actions) return row
+                    return (
+                      <div
+                        key={item.id}
+                        className={`flex items-center transition-colors ${rowTone}`}
+                        onMouseEnter={() => setHighlightedIndex(idx)}
+                      >
+                        {row}
+                        <div className="shrink-0 flex items-center gap-0.5 pr-2">{actions}</div>
+                      </div>
                     )
                   })}
                 </div>

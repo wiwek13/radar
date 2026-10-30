@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -242,6 +244,48 @@ func TestStartFailureIsReported(t *testing.T) {
 			t.Fatalf("failure reason not surfaced: %q", s.Error)
 		}
 	}
+}
+
+func TestSessionOutputReachesLogToWithItsContext(t *testing.T) {
+	m, home := newTestManager(t)
+	var buf syncBuffer
+	m.cfg.LogTo = &buf
+	t.Setenv("FAKE_RADAR_EXIT", "1")
+	info, err := m.Start("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, m, info.Slug, StateFailed)
+	if got := buf.String(); !strings.Contains(got, "[dev] fatal: cannot load kubeconfig\n") {
+		t.Fatalf("LogTo got %q", got)
+	}
+	data, _ := os.ReadFile(filepath.Join(home, info.Slug, "radar.log"))
+	if !strings.Contains(string(data), "fatal: cannot load kubeconfig") || strings.Contains(string(data), "[dev]") {
+		t.Fatalf("radar.log = %q", data)
+	}
+	snap, _, _ := m.Snapshot()
+	for _, s := range snap {
+		if s.Slug == info.Slug && !strings.Contains(s.Error, "cannot load kubeconfig") {
+			t.Fatalf("failure reason not surfaced: %q", s.Error)
+		}
+	}
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func TestStopEscalatesToKill(t *testing.T) {

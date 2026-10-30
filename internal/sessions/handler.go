@@ -2,9 +2,6 @@ package sessions
 
 import (
 	"context"
-	"crypto/rand"
-	_ "embed"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
@@ -13,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Backend is what the HTTP layer needs from the Manager.
@@ -32,8 +30,10 @@ const ControllerName = "radar-sessions"
 // it without a CORS preflight, and the controller answers none.
 const csrfHeader = "X-Radar-Sessions"
 
-//go:embed manager.html
-var managerPage string
+// pageStartWait bounds how long a page load waits for its session's Radar
+// to answer. Radar serves its UI before the cluster connects, so this only
+// covers the process starting.
+var pageStartWait = 90 * time.Second
 
 type targetKey struct{}
 
@@ -44,7 +44,7 @@ type handler struct {
 }
 
 // NewHandler serves the session controller. initial is the context "/"
-// opens.
+// opens; it must be a kubeconfig context.
 func NewHandler(b Backend, initial string) http.Handler {
 	h := &handler{backend: b, initial: initial}
 	h.proxy = &httputil.ReverseProxy{
@@ -74,13 +74,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
 	case path == "/":
-		target := "/_sessions/"
-		if h.initial != "" {
-			target = "/s/" + Slug(h.initial) + "/"
-		}
-		http.Redirect(w, r, target, http.StatusFound)
-	case path == "/_sessions" || path == "/_sessions/":
-		h.servePage(w, r)
+		http.Redirect(w, r, "/s/"+Slug(h.initial)+"/", http.StatusFound)
 	case strings.HasPrefix(path, "/_sessions/api/"):
 		h.serveAPI(w, r, strings.TrimPrefix(path, "/_sessions/api/"))
 	case strings.HasPrefix(path, "/s/"):
@@ -114,16 +108,60 @@ func (h *handler) serveSession(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if state == StateRunning && target != nil {
-		h.proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), targetKey{}, target)))
-		return
+	if state != StateRunning || target == nil {
+		// Only opening the page starts a session. A tab left open on a
+		// stopped session keeps getting 503s from its API calls instead of
+		// quietly bringing the session back.
+		if !isNavigation(r) {
+			writeJSONError(w, http.StatusServiceUnavailable, "session_"+string(state),
+				"The Radar session for "+contextName+" is "+string(state)+".")
+			return
+		}
+		var err error
+		if target, err = h.awaitRunning(r.Context(), slug, contextName); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Printf("[sessions] open %s: %v", contextName, err)
+				w.Header().Set("Cache-Control", "no-store")
+				http.Error(w, "Radar for "+contextName+" did not start: "+err.Error()+"\nReload to try again.", http.StatusServiceUnavailable)
+			}
+			return
+		}
 	}
-	if isNavigation(r) {
-		h.servePage(w, r)
-		return
+	h.proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), targetKey{}, target)))
+}
+
+// awaitRunning starts the session if it is not running and waits until its
+// Radar answers. A session that fails is started once per page load, never
+// in a loop.
+func (h *handler) awaitRunning(ctx context.Context, slug, contextName string) (*url.URL, error) {
+	deadline := time.NewTimer(pageStartWait)
+	defer deadline.Stop()
+	tick := time.NewTicker(150 * time.Millisecond)
+	defer tick.Stop()
+	started := false
+	for {
+		target, state, _, known := h.backend.Lookup(slug)
+		switch {
+		case !known:
+			return nil, ErrUnknownContext
+		case state == StateRunning && target != nil:
+			return target, nil
+		case state == StateFailed && started:
+			return nil, errors.New("the session failed; its log is in the radar-sessions home folder")
+		case state == StateStopped || state == StateFailed:
+			if _, err := h.backend.Start(contextName); err != nil && !errors.Is(err, ErrBusy) {
+				return nil, err
+			}
+			started = true
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-deadline.C:
+			return nil, errors.New("timed out waiting for it to answer")
+		case <-tick.C:
+		}
 	}
-	writeJSONError(w, http.StatusServiceUnavailable, "session_"+string(state),
-		"The Radar session for "+contextName+" is "+string(state)+".")
 }
 
 func (h *handler) serveAPI(w http.ResponseWriter, r *http.Request, route string) {
@@ -211,21 +249,8 @@ func (h *handler) serveAPI(w http.ResponseWriter, r *http.Request, route string)
 	}
 }
 
-func (h *handler) servePage(w http.ResponseWriter, r *http.Request) {
-	nonce := make([]byte, 16)
-	_, _ = rand.Read(nonce)
-	n := base64.StdEncoding.EncodeToString(nonce)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy",
-		"default-src 'none'; connect-src 'self'; style-src 'nonce-"+n+"'; script-src 'nonce-"+n+"'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
-	_, _ = w.Write([]byte(strings.ReplaceAll(managerPage, "{{NONCE}}", n)))
-}
-
 // isNavigation reports whether the browser is loading a page, as opposed to
-// the Radar UI fetching data. Only page loads get the status page.
+// the Radar UI fetching data.
 func isNavigation(r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false

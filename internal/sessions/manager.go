@@ -1,10 +1,12 @@
 package sessions
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -54,6 +56,9 @@ type Config struct {
 	RadarArgs    []string // extra flags for every session
 	ReadyTimeout time.Duration
 	StopTimeout  time.Duration
+	// LogTo also receives every session's output, each line prefixed with
+	// its context. The session's radar.log always gets it.
+	LogTo io.Writer
 }
 
 // Info is one session as the UI sees it.
@@ -100,6 +105,7 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*session
 	closing  bool
+	logMu    sync.Mutex
 }
 
 func NewManager(cfg Config) (*Manager, error) {
@@ -242,17 +248,35 @@ func (m *Manager) exec(s *session, dir, stateDir string, port int) (*process, er
 	if err != nil {
 		return nil, err
 	}
-	cmd.Stdout, cmd.Stderr = logFile, logFile
+	out := logFile
+	logDone := make(chan struct{})
+	if m.cfg.LogTo == nil {
+		close(logDone)
+	} else {
+		pipeR, pipeW, err := os.Pipe()
+		if err != nil {
+			logFile.Close()
+			return nil, err
+		}
+		out = pipeW
+		go func() {
+			defer close(logDone)
+			m.copyLog(pipeR, logFile, s.context)
+		}()
+	}
+	cmd.Stdout, cmd.Stderr = out, out
 
 	m.mu.Lock()
 	if s.state != StateStarting {
 		m.mu.Unlock()
-		logFile.Close()
+		out.Close()
 		os.Remove(kubeconfig)
 		return nil, errAborted
 	}
 	err = cmd.Start()
-	logFile.Close()
+	// The child holds its own copy; closing ours lets copyLog end when the
+	// session exits.
+	out.Close()
 	if err != nil {
 		m.mu.Unlock()
 		os.Remove(kubeconfig)
@@ -265,12 +289,37 @@ func (m *Manager) exec(s *session, dir, stateDir string, port int) (*process, er
 	writeRecord(dir, record{PID: proc.pid, Slug: s.slug, Context: s.context})
 	go func() {
 		_ = cmd.Wait()
+		// onExit reads the log's last lines to explain a failure.
+		select {
+		case <-logDone:
+		case <-time.After(2 * time.Second):
+		}
 		os.Remove(kubeconfig)
 		os.Remove(filepath.Join(dir, recordFile))
 		close(proc.exited)
 		m.onExit(s, proc)
 	}()
 	return proc, nil
+}
+
+// copyLog writes a session's output to its log file and, line by line with
+// the context as prefix, to cfg.LogTo.
+func (m *Manager) copyLog(r, file *os.File, contextName string) {
+	defer r.Close()
+	defer file.Close()
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	prefix := "[" + contextName + "] "
+	for sc.Scan() {
+		line := sc.Bytes()
+		_, _ = file.Write(append(line, '\n'))
+		m.logMu.Lock()
+		_, _ = io.WriteString(m.cfg.LogTo, prefix+string(line)+"\n")
+		m.logMu.Unlock()
+	}
+	// A line too long to scan must not leave the session blocked on a full
+	// pipe: keep draining into the file.
+	_, _ = io.Copy(file, r)
 }
 
 func (m *Manager) waitReady(s *session, proc *process) error {

@@ -70,6 +70,13 @@ func run() int {
 	if *initial == "" {
 		*initial = current
 	}
+	if *initial == "" && len(names) > 0 {
+		*initial = names[0]
+	}
+	if *initial == "" {
+		log.Print("the kubeconfig has no contexts")
+		return 1
+	}
 	if *initial != "" && !contains(names, *initial) {
 		log.Printf("context %q is not in the kubeconfig", *initial)
 		return 1
@@ -98,6 +105,7 @@ func run() int {
 		SeedFrom:   filepath.Join(home, ".radar"),
 		Kubeconfig: kc,
 		RadarArgs:  radarArgs,
+		LogTo:      os.Stderr,
 	})
 	if err != nil {
 		log.Print(err)
@@ -114,14 +122,11 @@ func run() int {
 		}
 	}()
 
-	open := base + "/_sessions/"
-	if *initial != "" {
-		if _, err := m.Start(*initial); err != nil {
-			log.Printf("start %s: %v", *initial, err)
-		}
-		open = base + "/s/" + sessions.Slug(*initial) + "/"
+	if _, err := m.Start(*initial); err != nil {
+		log.Printf("start %s: %v", *initial, err)
 	}
-	log.Printf("Radar sessions on %s/_sessions/ (Ctrl+C stops every session)", base)
+	open := base + "/s/" + sessions.Slug(*initial) + "/"
+	log.Printf("Radar sessions on %s (Ctrl+C stops every session)", open)
 	if !*noBrowser {
 		openBrowser(open)
 	}
@@ -155,16 +160,8 @@ func reuseRunning(base, contextName string, noBrowser bool) bool {
 	if json.NewDecoder(resp.Body).Decode(&state) != nil || state.Controller != sessions.ControllerName {
 		return false
 	}
-	open := base + "/_sessions/"
-	if contextName != "" {
-		slug := sessions.Slug(contextName)
-		req, _ := http.NewRequest(http.MethodPost, base+"/_sessions/api/sessions/"+slug+"/start", nil)
-		req.Header.Set("X-Radar-Sessions", "1")
-		if resp, err := client.Do(req); err == nil {
-			resp.Body.Close()
-		}
-		open = base + "/s/" + slug + "/"
-	}
+	// Loading the page starts the session.
+	open := base + "/s/" + sessions.Slug(contextName) + "/"
 	log.Printf("Radar sessions is already running on %s; opening it", base)
 	if !noBrowser {
 		openBrowser(open)

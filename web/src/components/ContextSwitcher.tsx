@@ -7,6 +7,8 @@ import { useContexts, useClusterInfo, useCapabilities } from '../api/client'
 import type { ContextInfo } from '../types'
 import { useContextSwitchFlow } from './useContextSwitchFlow'
 import { parseContextForSwitcher, visibleContextQualifier, type ParsedContextName } from '../utils/context-name'
+import { SessionSwitcher } from './sessions/SessionSwitcher'
+import { useClusterSessions } from './sessions/useClusterSessions'
 
 interface ContextSwitcherProps {
   className?: string
@@ -29,6 +31,7 @@ export const ContextSwitcher = forwardRef<ContextSwitcherHandle, ContextSwitcher
   const { data: clusterInfo } = useClusterInfo()
   const { data: capabilities } = useCapabilities()
   const switchFlow = useContextSwitchFlow()
+  const sessions = useClusterSessions()
 
   // Parse contexts and decide whether to render group headers (multi-account only).
   // hasMultipleSources gates the kubeconfig-source chip — only useful when 2+
@@ -90,6 +93,10 @@ export const ContextSwitcher = forwardRef<ContextSwitcherHandle, ContextSwitcher
     const parsed = parsedById.get(item.id)
     if (!parsed) return
     switchFlow.requestSwitch(parsed.context)
+  }
+
+  if (sessions) {
+    return <SessionSwitcher ref={ref} sessions={sessions} className={className} variant={variant} label={label} />
   }
 
   // In-cluster mode renders a static badge instead of a switcher (only one
