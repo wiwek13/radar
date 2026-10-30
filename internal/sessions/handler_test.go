@@ -356,3 +356,70 @@ func TestWebSocketUpgradeReachesOwnSession(t *testing.T) {
 		}
 	}
 }
+
+func TestIframeLoadStartsSession(t *testing.T) {
+	b := newFakeBackend(t, "dev")
+	h := NewHandler(b, "dev")
+	rec := serve(h, "GET", "/s/"+Slug("dev")+"/", map[string]string{"Sec-Fetch-Dest": "iframe"})
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Served-By") != "dev" || len(b.started) != 1 {
+		t.Fatalf("iframe load = %d served by %q, started %v", rec.Code, rec.Header().Get("X-Served-By"), b.started)
+	}
+}
+
+func TestSplitCleansClusterList(t *testing.T) {
+	h := NewHandler(newFakeBackend(t, "dev", "prod", "qa", "stage"), "dev")
+	dev, prod, qa, stage := Slug("dev"), Slug("prod"), Slug("qa"), Slug("stage")
+	raw := "/split?s=" + prod + ",nope-12345678,BAD!," + prod + "," + dev + "," + qa + "," + stage
+	rec := serve(h, "GET", raw, nil)
+	want := "/split?s=" + prod + "," + dev + "," + qa
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != want {
+		t.Fatalf("got %d %q, want redirect to %q", rec.Code, rec.Header().Get("Location"), want)
+	}
+	clean := serve(h, "GET", want, nil)
+	if clean.Code != http.StatusOK || !strings.Contains(clean.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("clean split = %d %q", clean.Code, clean.Header().Get("Content-Type"))
+	}
+}
+
+func TestSplitWithOneClusterOpensSingleView(t *testing.T) {
+	h := NewHandler(newFakeBackend(t, "dev", "prod"), "dev")
+	for raw, want := range map[string]string{
+		"/split?s=" + Slug("prod") + ",unknown-00000000": "/s/" + Slug("prod") + "/",
+		"/split":      "/s/" + Slug("dev") + "/",
+		"/split?s=,,": "/s/" + Slug("dev") + "/",
+	} {
+		rec := serve(h, "GET", raw, nil)
+		if rec.Code != http.StatusFound || rec.Header().Get("Location") != want {
+			t.Fatalf("%s: got %d %q, want %q", raw, rec.Code, rec.Header().Get("Location"), want)
+		}
+	}
+}
+
+func TestSplitPageHeaders(t *testing.T) {
+	h := NewHandler(newFakeBackend(t, "dev", "prod"), "dev")
+	rec := serve(h, "GET", "/split?s="+Slug("dev")+","+Slug("prod"), nil)
+	csp := rec.Header().Get("Content-Security-Policy")
+	for _, want := range []string{"default-src 'none'", "frame-src 'self'", "frame-ancestors 'none'", "connect-src 'self'"} {
+		if !strings.Contains(csp, want) {
+			t.Fatalf("CSP %q lacks %q", csp, want)
+		}
+	}
+	if strings.Contains(csp, "unsafe-inline") || strings.Contains(rec.Body.String(), "{{NONCE}}") {
+		t.Fatalf("CSP or nonce not applied: %q", csp)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("headers = %v", rec.Header())
+	}
+	if post := serve(h, "POST", "/split?s="+Slug("dev")+","+Slug("prod"), nil); post.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /split = %d", post.Code)
+	}
+}
+
+func TestProxyRefusesForeignFraming(t *testing.T) {
+	b := newFakeBackend(t, "dev")
+	b.run("dev")
+	rec := serve(NewHandler(b, "dev"), "GET", "/s/"+Slug("dev")+"/", nil)
+	if rec.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
+		t.Fatalf("X-Frame-Options = %q", rec.Header().Get("X-Frame-Options"))
+	}
+}

@@ -2,6 +2,9 @@ package sessions
 
 import (
 	"context"
+	"crypto/rand"
+	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
@@ -9,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -29,6 +33,12 @@ const ControllerName = "radar-sessions"
 // csrfHeader must accompany every write. A page on another site cannot set
 // it without a CORS preflight, and the controller answers none.
 const csrfHeader = "X-Radar-Sessions"
+
+//go:embed split.html
+var splitPage string
+
+// maxSplitPanes caps the split view; past three a Radar is too narrow to use.
+const maxSplitPanes = 3
 
 // pageStartWait bounds how long a page load waits for its session's Radar
 // to answer. Radar serves its UI before the cluster connects, so this only
@@ -55,6 +65,13 @@ func NewHandler(b Backend, initial string) http.Handler {
 			pr.Out.Host = pr.In.Host
 		},
 		FlushInterval: -1,
+		// Only this controller's own pages may frame a cluster's Radar.
+		ModifyResponse: func(resp *http.Response) error {
+			if resp.Header.Get("X-Frame-Options") == "" {
+				resp.Header.Set("X-Frame-Options", "SAMEORIGIN")
+			}
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, context.Canceled) {
 				return
@@ -75,6 +92,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/":
 		http.Redirect(w, r, "/s/"+Slug(h.initial)+"/", http.StatusFound)
+	case path == "/split":
+		h.serveSplit(w, r)
 	case strings.HasPrefix(path, "/_sessions/api/"):
 		h.serveAPI(w, r, strings.TrimPrefix(path, "/_sessions/api/"))
 	case strings.HasPrefix(path, "/s/"):
@@ -249,6 +268,62 @@ func (h *handler) serveAPI(w http.ResponseWriter, r *http.Request, route string)
 	}
 }
 
+// serveSplit shows 2 or 3 sessions side by side. The page only arranges
+// /s/<slug>/ frames; the cluster list is cleaned here so a hand-typed
+// address can name only known contexts.
+func (h *handler) serveSplit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "use GET", http.StatusMethodNotAllowed)
+		return
+	}
+	raw := r.URL.Query().Get("s")
+	slugs := h.splitSlugs(raw)
+	if len(slugs) < 2 {
+		single := Slug(h.initial)
+		if len(slugs) == 1 {
+			single = slugs[0]
+		}
+		http.Redirect(w, r, "/s/"+single+"/", http.StatusFound)
+		return
+	}
+	if clean := strings.Join(slugs, ","); clean != raw || len(r.URL.Query()) != 1 {
+		http.Redirect(w, r, "/split?s="+clean, http.StatusFound)
+		return
+	}
+
+	nonce := make([]byte, 16)
+	_, _ = rand.Read(nonce)
+	n := base64.StdEncoding.EncodeToString(nonce)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy",
+		"default-src 'none'; connect-src 'self'; frame-src 'self'; img-src 'self' data:; "+
+			"style-src 'nonce-"+n+"'; script-src 'nonce-"+n+"'; "+
+			"frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+	_, _ = w.Write([]byte(strings.ReplaceAll(splitPage, "{{NONCE}}", n)))
+}
+
+// splitSlugs keeps the valid, known and unique slugs of a comma-separated
+// list, in order, up to maxSplitPanes.
+func (h *handler) splitSlugs(raw string) []string {
+	var out []string
+	for _, slug := range strings.Split(raw, ",") {
+		if len(out) == maxSplitPanes {
+			break
+		}
+		if !ValidSlug(slug) || slices.Contains(out, slug) {
+			continue
+		}
+		if _, _, _, known := h.backend.Lookup(slug); known {
+			out = append(out, slug)
+		}
+	}
+	return out
+}
+
 // isNavigation reports whether the browser is loading a page, as opposed to
 // the Radar UI fetching data.
 func isNavigation(r *http.Request) bool {
@@ -256,7 +331,7 @@ func isNavigation(r *http.Request) bool {
 		return false
 	}
 	if dest := r.Header.Get("Sec-Fetch-Dest"); dest != "" {
-		return dest == "document"
+		return dest == "document" || dest == "iframe"
 	}
 	return strings.Contains(r.Header.Get("Accept"), "text/html")
 }
