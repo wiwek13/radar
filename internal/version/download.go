@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/skyhook-io/radar/internal/statedir"
 )
 
 // githubAsset represents a single file attached to a GitHub release.
@@ -230,11 +232,10 @@ func VerifyChecksum(ctx context.Context, release *githubReleaseWithAssets, asset
 
 // UpdatesDir returns the path to the updates directory (~/.radar/updates/).
 func UpdatesDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := statedir.Path("updates")
 	if err != nil {
-		return "", fmt.Errorf("get home dir: %w", err)
+		return "", fmt.Errorf("get state dir: %w", err)
 	}
-	dir := filepath.Join(home, ".radar", "updates")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create updates dir: %w", err)
 	}

@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/skyhook-io/radar/internal/statedir"
 )
 
 // The webview's origin includes the server's port, and browser storage is
@@ -23,11 +25,11 @@ import (
 const desktopPortFile = "desktop-port"
 
 func desktopPortPath() string {
-	home, err := os.UserHomeDir()
+	path, err := statedir.Path(desktopPortFile)
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".radar", desktopPortFile)
+	return path
 }
 
 func lastDesktopPort(path string) int {

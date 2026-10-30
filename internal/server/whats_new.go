@@ -14,6 +14,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
+	"github.com/skyhook-io/radar/internal/statedir"
 	"github.com/skyhook-io/radar/internal/version"
 )
 
@@ -120,11 +121,7 @@ func versionAfter(a, b string) bool {
 }
 
 func radarDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".radar"), nil
+	return statedir.Dir()
 }
 
 func radarDirHadState() bool {

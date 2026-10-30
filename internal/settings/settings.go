@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/skyhook-io/radar/internal/statedir"
 )
 
 // PinnedKind is a resource kind the user has pinned to the sidebar.
@@ -92,12 +94,12 @@ var mu sync.Mutex
 
 // Path returns the settings file path (~/.radar/settings.json).
 func Path() string {
-	homeDir, err := os.UserHomeDir()
+	path, err := statedir.Path("settings.json")
 	if err != nil {
-		log.Printf("[settings] Cannot determine home directory: %v (settings will not be persisted)", err)
+		log.Printf("[settings] Cannot determine state directory: %v (settings will not be persisted)", err)
 		return ""
 	}
-	return filepath.Join(homeDir, ".radar", "settings.json")
+	return path
 }
 
 // Load reads settings from disk. Returns zero-value Settings if the file is missing or invalid.
@@ -197,11 +199,10 @@ func UpdateChecked(mutate func(*Settings)) (Settings, error) {
 // The O_EXCL create makes a concurrent first mint (CLI and Desktop starting
 // together) resolve to one winner; losers adopt the winner's file.
 func RolloutKey() string {
-	homeDir, err := os.UserHomeDir()
+	path, err := statedir.Path("install-id")
 	if err != nil {
 		return ""
 	}
-	path := filepath.Join(homeDir, ".radar", "install-id")
 	if data, err := os.ReadFile(path); err == nil {
 		return strings.TrimSpace(string(data))
 	}

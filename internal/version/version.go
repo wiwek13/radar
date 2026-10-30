@@ -19,6 +19,7 @@ import (
 
 	"github.com/skyhook-io/radar/internal/k8s"
 	"github.com/skyhook-io/radar/internal/launchday"
+	"github.com/skyhook-io/radar/internal/statedir"
 )
 
 var (
@@ -532,11 +533,11 @@ func installTimestamp(ctx context.Context, mode string) int64 {
 // radarDirBirthtime returns the creation timestamp of ~/.radar/ as Unix epoch
 // seconds, or 0 if unavailable.
 func radarDirBirthtime() int64 {
-	homeDir, err := os.UserHomeDir()
+	dir, err := statedir.Dir()
 	if err != nil {
 		return 0
 	}
-	return dirBirthtime(filepath.Join(homeDir, ".radar"))
+	return dirBirthtime(dir)
 }
 
 // detectInstallMethod determines how Radar was installed based on binary path

@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/skyhook-io/radar/internal/ai"
 	"github.com/skyhook-io/radar/internal/config"
+	"github.com/skyhook-io/radar/internal/statedir"
 	"github.com/skyhook-io/radar/pkg/resourceid"
 )
 
@@ -303,14 +303,14 @@ func resolveServer(explicit string) (string, error) {
 	if explicit != "" {
 		return strings.TrimRight(explicit, "/"), nil
 	}
-	home, err := os.UserHomeDir()
+	portFile, err := statedir.Path("mcp-port")
 	if err != nil {
-		return "", fmt.Errorf("cannot determine home dir: %w", err)
+		return "", fmt.Errorf("cannot determine state directory: %w", err)
 	}
-	b, err := os.ReadFile(filepath.Join(home, ".radar", "mcp-port"))
+	b, err := os.ReadFile(portFile)
 	if err != nil {
 		return "", fmt.Errorf("no running Radar found (%s missing) — start radar first, or pass --server http://localhost:<port>",
-			filepath.Join(home, ".radar", "mcp-port"))
+			portFile)
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	port, err := strconv.Atoi(strings.TrimSpace(lines[0]))

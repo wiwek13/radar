@@ -29,6 +29,7 @@ import (
 	prometheuspkg "github.com/skyhook-io/radar/internal/prometheus"
 	"github.com/skyhook-io/radar/internal/server"
 	"github.com/skyhook-io/radar/internal/settings"
+	"github.com/skyhook-io/radar/internal/statedir"
 	"github.com/skyhook-io/radar/internal/static"
 	"github.com/skyhook-io/radar/internal/timeline"
 	"github.com/skyhook-io/radar/internal/traffic"
@@ -250,8 +251,7 @@ func BuildTimelineStoreConfig(cfg AppConfig) (timeline.StoreConfig, error) {
 		storeCfg.Type = timeline.StoreTypeSQLite
 		dbPath := cfg.TimelineDBPath
 		if dbPath == "" {
-			homeDir, _ := os.UserHomeDir()
-			dbPath = filepath.Join(homeDir, ".radar", "timeline.db")
+			dbPath, _ = statedir.Path("timeline.db")
 		}
 		storeCfg.Path = dbPath
 		storeCfg.RetentionAge = cfg.TimelineRetention
@@ -556,8 +556,7 @@ func CreateServer(cfg AppConfig) *server.Server {
 	if cfg.AIHistory {
 		dbPath := cfg.AIHistoryDBPath
 		if dbPath == "" {
-			homeDir, _ := os.UserHomeDir()
-			dbPath = filepath.Join(homeDir, ".radar", "ai-runs.db")
+			dbPath, _ = statedir.Path("ai-runs.db")
 		}
 		serverCfg.AIHistoryDB = dbPath
 	}
@@ -760,12 +759,12 @@ func RemoveMCPPortFile() {
 }
 
 func mcpPortFilePath() string {
-	homeDir, err := os.UserHomeDir()
+	path, err := statedir.Path("mcp-port")
 	if err != nil {
-		log.Printf("[mcp] Cannot determine home directory: %v (port file will not be written)", err)
+		log.Printf("[mcp] Cannot determine state directory: %v (port file will not be written)", err)
 		return ""
 	}
-	return filepath.Join(homeDir, ".radar", "mcp-port")
+	return path
 }
 
 // Shutdown performs graceful teardown of all subsystems and the HTTP server.

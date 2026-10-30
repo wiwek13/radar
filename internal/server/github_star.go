@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"github.com/skyhook-io/radar/internal/launchday"
+	"github.com/skyhook-io/radar/internal/statedir"
 	"net/http"
 	"os"
 	"os/exec"
@@ -103,11 +104,11 @@ func (s *githubStarState) shouldPromptUI() bool {
 }
 
 func readStarJSON() *githubStarState {
-	homeDir, err := os.UserHomeDir()
+	path, err := statedir.Path("star.json")
 	if err != nil {
 		return &githubStarState{}
 	}
-	data, err := os.ReadFile(filepath.Join(homeDir, ".radar", "star.json"))
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return &githubStarState{}
 	}
@@ -119,11 +120,10 @@ func readStarJSON() *githubStarState {
 }
 
 func writeStarJSON(state *githubStarState) {
-	homeDir, err := os.UserHomeDir()
+	path, err := statedir.Path("star.json")
 	if err != nil {
 		return
 	}
-	path := filepath.Join(homeDir, ".radar", "star.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return
 	}

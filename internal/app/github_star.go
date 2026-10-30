@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/skyhook-io/radar/internal/launchday"
+	"github.com/skyhook-io/radar/internal/statedir"
 	"golang.org/x/term"
 )
 
@@ -195,11 +196,7 @@ func trackAndMaybePrompt() error {
 }
 
 func starStatePath() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(homeDir, ".radar", "star.json"), nil
+	return statedir.Path("star.json")
 }
 
 func loadStarState(path string) *starState {

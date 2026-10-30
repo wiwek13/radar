@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/skyhook-io/radar/internal/statedir"
 )
 
 // Config holds startup configuration persisted across restarts.
@@ -135,12 +137,12 @@ var mu sync.Mutex
 
 // Path returns the config file path (~/.radar/config.json).
 func Path() string {
-	homeDir, err := os.UserHomeDir()
+	path, err := statedir.Path("config.json")
 	if err != nil {
-		log.Printf("[config] Cannot determine home directory: %v (config will not be persisted)", err)
+		log.Printf("[config] Cannot determine state directory: %v (config will not be persisted)", err)
 		return ""
 	}
-	return filepath.Join(homeDir, ".radar", "config.json")
+	return path
 }
 
 // Load reads config from disk. Returns zero-value Config if the file is missing or invalid.
